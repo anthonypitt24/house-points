@@ -1,47 +1,177 @@
 import streamlit as st
 import json
 import os
+import random
 from datetime import date, datetime, timedelta
 from collections import defaultdict
 
 # ============================================================
-# HOUSE POINTS — FAIR HOUSE CUP
+# HOUSE POINTS v2
+# Fair competition + profiles + rewards + mobile UI
 # ============================================================
 
 st.set_page_config(
     page_title="House Points",
     page_icon="🏠",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed",
 )
 
 DATA_FILE = "house_points_data.json"
 
-# ============================================================
-# CHILDREN
-# ============================================================
-
 KIDS = ["Myron", "Brodie"]
 
-# Days each child is normally available.
-# 0 = Monday ... 6 = Sunday
-#
-# Change these if the arrangements change.
-#
-# Brodie:
-# Wednesday + one weekend day.
-#
-# We deliberately don't count days he isn't available.
+# Monday=0 ... Sunday=6
 DEFAULT_AVAILABILITY = {
     "Myron": [0, 1, 2, 3, 4, 5, 6],
-    "Brodie": [2, 5, 6],
+    "Brodie": [2, 5],
+}
+
+DEFAULT_PIN = "1234"
+
+# ============================================================
+# TASKS
+# ============================================================
+
+TASK_MENU = {
+    "⚡ Quick Jobs": {
+        "Water the plants": 1,
+        "Empty the dishwasher": 2,
+        "Load the dishwasher": 2,
+        "Empty a kitchen bin": 1,
+        "Set the table": 1,
+        "Clear the table": 1,
+    },
+
+    "🧹 Medium Jobs": {
+        "Take bins out to the curb": 3,
+        "Bring empty bins back in": 2,
+        "Hoover a room": 4,
+        "Sort and put out recycling": 3,
+        "Tidy the shoe/coat area": 3,
+        "Dust downstairs surfaces": 3,
+    },
+
+    "💪 Bigger Jobs": {
+        "Help with the grass": 6,
+        "Wash the car": 6,
+        "Change bed sheets": 5,
+        "Full bathroom clean": 8,
+    },
+
+    "📚 Personal Growth": {
+        "Finished a book": 10,
+        "Learned a new skill/fact": 10,
+        "Practised an instrument/hobby": 5,
+    },
+
+    "🛏️ Own Room": {
+        "Tidied own bedroom": 2,
+    },
 }
 
 # ============================================================
-# DEVICE TIME
+# DEFAULT REWARDS
 # ============================================================
 
-DEVICE_TIME_RATE = 10
-DEVICE_BLOCK_MINUTES = 30
+DEFAULT_REWARDS = [
+    {
+        "name": "30 Minutes Device Time",
+        "points": 10,
+        "description": "30 minutes Xbox/tablet/device time",
+        "emoji": "🎮",
+    },
+    {
+        "name": "1 Hour Device Time",
+        "points": 20,
+        "description": "One hour of device time",
+        "emoji": "🎮",
+    },
+    {
+        "name": "Choose the Friday Film",
+        "points": 25,
+        "description": "You choose the family film",
+        "emoji": "🎬",
+    },
+    {
+        "name": "Choose Family Activity",
+        "points": 40,
+        "description": "Choose what the family does",
+        "emoji": "🏃",
+    },
+    {
+        "name": "£2 Pocket Money",
+        "points": 50,
+        "description": "£2 pocket money",
+        "emoji": "💷",
+    },
+]
+
+# ============================================================
+# BADGES
+# ============================================================
+
+BADGES = [
+    {
+        "id": "first_task",
+        "name": "First Step",
+        "emoji": "👣",
+        "description": "Complete your first task.",
+    },
+    {
+        "id": "ten_tasks",
+        "name": "Busy Bee",
+        "emoji": "🐝",
+        "description": "Complete 10 tasks.",
+    },
+    {
+        "id": "fifty_points",
+        "name": "Point Collector",
+        "emoji": "⭐",
+        "description": "Earn 50 points.",
+    },
+    {
+        "id": "hundred_points",
+        "name": "Century Club",
+        "emoji": "💯",
+        "description": "Earn 100 points.",
+    },
+    {
+        "id": "three_day_streak",
+        "name": "On Fire",
+        "emoji": "🔥",
+        "description": "Complete tasks on 3 consecutive days.",
+    },
+    {
+        "id": "seven_day_streak",
+        "name": "Unstoppable",
+        "emoji": "🚀",
+        "description": "Complete tasks on 7 consecutive days.",
+    },
+    {
+        "id": "challenge",
+        "name": "Challenge Accepted",
+        "emoji": "🎯",
+        "description": "Complete a weekly challenge.",
+    },
+    {
+        "id": "helper",
+        "name": "Super Helper",
+        "emoji": "🤝",
+        "description": "Be named Helper of the Week.",
+    },
+]
+
+# ============================================================
+# DEFAULT CHALLENGE
+# ============================================================
+
+DEFAULT_CHALLENGE = {
+    "title": "The Weekend Challenge",
+    "description": "Complete 3 jobs while you're here.",
+    "target": 3,
+    "bonus": 10,
+}
 
 # ============================================================
 # BIN SCHEDULE
@@ -60,102 +190,9 @@ def bin_type_for_date(d):
     return "Recycling + food waste caddy"
 
 
-def next_tuesday(from_date):
-    days_ahead = (1 - from_date.weekday()) % 7
-
-    if days_ahead == 0:
-        return from_date
-
-    return from_date + timedelta(days=days_ahead)
-
-
-# ============================================================
-# TASKS
-# ============================================================
-
-TASK_MENU = {
-    "Quick jobs": {
-        "Water the plants": 1,
-        "Empty the dishwasher": 2,
-        "Load the dishwasher": 2,
-        "Empty a kitchen bin": 1,
-        "Set the table": 1,
-        "Clear the table": 1,
-    },
-
-    "Medium jobs": {
-        "Take bins out to the curb": 3,
-        "Bring empty bins back in": 2,
-        "Hoover a room": 4,
-        "Sort and put out cardboard/recycling": 3,
-        "Tidy the shoe/coat area": 3,
-        "Dust downstairs surfaces": 3,
-    },
-
-    "Bigger jobs": {
-        "Help with the grass": 6,
-        "Wash the car": 6,
-        "Change bed sheets": 5,
-        "Full bathroom clean": 8,
-    },
-
-    "Personal growth": {
-        "Finished a book": 10,
-        "Learned a new skill/fact": 10,
-        "Practised an instrument/hobby": 5,
-    },
-
-    "Own room": {
-        "Tidied own bedroom": 2,
-    },
-}
-
-
-# ============================================================
-# REWARDS
-# ============================================================
-
-DEFAULT_REWARDS = [
-    {
-        "name": "30 minutes device time",
-        "points": 10,
-        "description": "30 minutes Xbox/tablet/device time"
-    },
-    {
-        "name": "1 hour device time",
-        "points": 20,
-        "description": "One hour of device time"
-    },
-    {
-        "name": "Choose the Friday film",
-        "points": 25,
-        "description": "You choose the family film"
-    },
-    {
-        "name": "Choose the family activity",
-        "points": 40,
-        "description": "Choose a family activity"
-    },
-    {
-        "name": "£2 pocket money",
-        "points": 50,
-        "description": "£2 pocket money"
-    },
-]
-
-
-# ============================================================
-# WEEKLY AWARDS
-# ============================================================
-
-AWARDS = [
-    "🏆 Points Champion",
-    "⚖️ Consistency Champion",
-    "📈 Biggest Effort",
-    "🤝 Helper of the Week",
-    "🎯 Challenge Champion",
-    "📚 Personal Achievement",
-]
+def next_tuesday(d):
+    days_ahead = (1 - d.weekday()) % 7
+    return d + timedelta(days=days_ahead)
 
 
 # ============================================================
@@ -163,210 +200,309 @@ AWARDS = [
 # ============================================================
 
 def default_data():
-
     return {
-        "balances": {
-            kid: 0
-            for kid in KIDS
-        },
+        "balances": {kid: 0 for kid in KIDS},
 
         "log": [],
 
         "redemptions": [],
 
-        "rewards": DEFAULT_REWARDS,
+        "rewards": DEFAULT_REWARDS.copy(),
 
-        "availability": DEFAULT_AVAILABILITY,
+        "availability": DEFAULT_AVAILABILITY.copy(),
 
-        "weekly_challenges": {
-            "title": "Weekend Challenge",
-            "description": "Complete 3 jobs while you're here",
-            "bonus": 10
-        },
+        "challenge": DEFAULT_CHALLENGE.copy(),
 
-        "challenge_progress": {
-            kid: 0
-            for kid in KIDS
-        },
+        "challenge_progress": {kid: 0 for kid in KIDS},
 
         "helper_awards": [],
 
+        "profiles": {
+            kid: {
+                "badges": [],
+                "colour": "",
+            }
+            for kid in KIDS
+        },
+
         "settings": {
-            "parent_pin": "1234"
-        }
+            "parent_pin": DEFAULT_PIN,
+        },
     }
 
 
 def load_data():
+    if not os.path.exists(DATA_FILE):
+        return default_data()
 
-    if os.path.exists(DATA_FILE):
+    try:
+        with open(DATA_FILE, "r") as f:
+            data = json.load(f)
+    except Exception:
+        return default_data()
 
-        try:
+    defaults = default_data()
 
-            with open(DATA_FILE, "r") as f:
-                data = json.load(f)
+    for key, value in defaults.items():
+        if key not in data:
+            data[key] = value
 
-            defaults = default_data()
+    for kid in KIDS:
 
-            for key, value in defaults.items():
+        if kid not in data["balances"]:
+            data["balances"][kid] = 0
 
-                if key not in data:
-                    data[key] = value
+        if kid not in data["availability"]:
+            data["availability"][kid] = DEFAULT_AVAILABILITY.get(
+                kid, []
+            )
 
-            return data
+        if kid not in data["challenge_progress"]:
+            data["challenge_progress"][kid] = 0
 
-        except Exception:
+        if kid not in data["profiles"]:
+            data["profiles"][kid] = {
+                "badges": [],
+                "colour": "",
+            }
 
-            return default_data()
-
-    return default_data()
+    return data
 
 
 def save_data(data):
-
     with open(DATA_FILE, "w") as f:
-
-        json.dump(
-            data,
-            f,
-            indent=2
-        )
+        json.dump(data, f, indent=2)
 
 
 if "data" not in st.session_state:
-
     st.session_state.data = load_data()
-
 
 data = st.session_state.data
 
-
 # ============================================================
-# HELPER FUNCTIONS
+# DATE HELPERS
 # ============================================================
 
-def current_week_start():
-
-    today = date.today()
-
-    return today - timedelta(days=today.weekday())
+TODAY = date.today()
 
 
-def week_key(d):
+def week_start(d=None):
+    if d is None:
+        d = TODAY
 
-    return d.strftime("%Y-%m-%d")
+    return d - timedelta(days=d.weekday())
+
+
+def previous_week_start():
+    return week_start() - timedelta(days=7)
 
 
 def parse_date(value):
-
     try:
         return datetime.strptime(
             value,
             "%Y-%m-%d"
         ).date()
-
     except Exception:
-        return date.today()
+        return TODAY
 
+
+def in_current_week(d):
+    return d >= week_start()
+
+
+def in_previous_week(d):
+    return previous_week_start() <= d < week_start()
+
+
+# ============================================================
+# AVAILABILITY
+# ============================================================
 
 def kid_available(kid, d):
-
     return d.weekday() in data["availability"].get(
         kid,
         []
     )
 
 
-def available_days_this_week(kid):
-
-    start = current_week_start()
-
+def available_days(kid, start, end):
     count = 0
+    current = start
 
-    for i in range(7):
+    while current < end:
 
-        d = start + timedelta(days=i)
-
-        if kid_available(kid, d):
+        if kid_available(kid, current):
             count += 1
+
+        current += timedelta(days=1)
 
     return count
 
 
-def points_earned_this_week(kid):
+def available_days_this_week(kid):
+    return available_days(
+        kid,
+        week_start(),
+        week_start() + timedelta(days=7)
+    )
 
-    start = current_week_start()
 
+# ============================================================
+# POINT CALCULATIONS
+# ============================================================
+
+def approved_entries():
+    return [
+        e for e in data["log"]
+        if e.get("approved", True)
+    ]
+
+
+def points_between(kid, start, end):
     total = 0
 
-    for entry in data["log"]:
+    for entry in approved_entries():
 
         if entry.get("kid") != kid:
             continue
 
         d = parse_date(entry.get("date"))
 
-        if d >= start:
+        if start <= d < end:
             total += int(entry.get("points", 0))
 
     return total
 
 
-def tasks_completed_this_week(kid):
+def points_this_week(kid):
+    return points_between(
+        kid,
+        week_start(),
+        week_start() + timedelta(days=7)
+    )
 
-    start = current_week_start()
 
+def points_previous_week(kid):
+    return points_between(
+        kid,
+        previous_week_start(),
+        week_start()
+    )
+
+
+def tasks_this_week(kid):
     count = 0
 
-    for entry in data["log"]:
+    for entry in approved_entries():
 
         if entry.get("kid") != kid:
             continue
 
         d = parse_date(entry.get("date"))
 
-        if d >= start:
+        if in_current_week(d):
             count += 1
 
     return count
+
+
+def total_tasks(kid):
+    return sum(
+        1
+        for entry in approved_entries()
+        if entry.get("kid") == kid
+    )
+
+
+def total_points_earned(kid):
+    return sum(
+        int(entry.get("points", 0))
+        for entry in approved_entries()
+        if entry.get("kid") == kid
+    )
 
 
 def points_per_available_day(kid):
-
     days = available_days_this_week(kid)
 
-    if days == 0:
+    if days <= 0:
         return 0
 
-    return points_earned_this_week(kid) / days
+    return points_this_week(kid) / days
 
 
-def previous_week_points(kid):
+# ============================================================
+# FAIRNESS SCORE
+# ============================================================
 
-    start = current_week_start()
+def fairness_score(kid):
+    """
+    Fairness score is NOT simply the points total.
 
-    previous_start = start - timedelta(days=7)
+    It considers:
+      1. points per available day
+      2. tasks completed
+      3. improvement versus previous week
 
-    total = 0
+    The score is normalised against the best child.
+    """
 
-    for entry in data["log"]:
+    daily_scores = {
+        child: points_per_available_day(child)
+        for child in KIDS
+    }
 
-        if entry.get("kid") != kid:
-            continue
+    max_daily = max(
+        daily_scores.values()
+    ) if daily_scores else 0
 
-        d = parse_date(entry.get("date"))
+    if max_daily <= 0:
+        daily_component = 0
+    else:
+        daily_component = (
+            daily_scores[kid] / max_daily
+        ) * 60
 
-        if previous_start <= d < start:
-            total += int(entry.get("points", 0))
+    # Task participation
+    task_scores = {
+        child: tasks_this_week(child)
+        for child in KIDS
+    }
 
-    return total
+    max_tasks = max(
+        task_scores.values()
+    ) if task_scores else 0
+
+    if max_tasks <= 0:
+        task_component = 0
+    else:
+        task_component = (
+            task_scores[kid] / max_tasks
+        ) * 20
+
+    # Improvement
+    improvement = improvement_percentage(kid)
+
+    if improvement <= 0:
+        improvement_component = 0
+    else:
+        improvement_component = min(
+            improvement,
+            100
+        ) / 100 * 20
+
+    return round(
+        daily_component
+        + task_component
+        + improvement_component,
+        1
+    )
 
 
-def improvement_score(kid):
-
-    current = points_earned_this_week(kid)
-
-    previous = previous_week_points(kid)
+def improvement_percentage(kid):
+    current = points_this_week(kid)
+    previous = points_previous_week(kid)
 
     if previous == 0:
 
@@ -375,30 +511,41 @@ def improvement_score(kid):
 
         return 0
 
-    return ((current - previous) / previous) * 100
+    return (
+        (current - previous)
+        / previous
+    ) * 100
 
 
-def streak_for_kid(kid):
+# ============================================================
+# STREAKS
+# ============================================================
 
-    logged_dates = set()
+def task_dates(kid):
 
-    for entry in data["log"]:
+    dates = set()
 
-        if entry.get("kid") != kid:
-            continue
+    for entry in approved_entries():
 
-        logged_dates.add(
-            parse_date(entry.get("date"))
-        )
+        if entry.get("kid") == kid:
+            dates.add(
+                parse_date(entry.get("date"))
+            )
 
-    if not logged_dates:
+    return dates
+
+
+def current_streak(kid):
+
+    dates = task_dates(kid)
+
+    if not dates:
         return 0
 
     streak = 0
+    check = TODAY
 
-    check = date.today()
-
-    while check in logged_dates:
+    while check in dates:
 
         streak += 1
         check -= timedelta(days=1)
@@ -406,51 +553,188 @@ def streak_for_kid(kid):
     return streak
 
 
-def challenge_progress(kid):
+# ============================================================
+# BADGES
+# ============================================================
 
-    return int(
-        data.get("challenge_progress", {}).get(
-            kid,
-            0
-        )
+def badge_unlocked(kid, badge_id):
+
+    badges = data["profiles"][kid].get(
+        "badges",
+        []
     )
 
-
-def challenge_complete(kid):
-
-    return challenge_progress(kid) >= 3
+    return badge_id in badges
 
 
-def add_points(kid, points, task, note="", approved=True):
+def award_badges(kid):
 
-    data["balances"][kid] += points
-
-    data["log"].append(
-        {
-            "date": date.today().isoformat(),
-            "kid": kid,
-            "task": task,
-            "points": points,
-            "note": note,
-            "approved": approved,
-        }
+    unlocked = data["profiles"][kid].setdefault(
+        "badges",
+        []
     )
+
+    total_tasks_done = total_tasks(kid)
+    total_points = total_points_earned(kid)
+    streak = current_streak(kid)
+    challenge_done = (
+        data["challenge_progress"].get(kid, 0)
+        >= data["challenge"]["target"]
+    )
+
+    checks = {
+        "first_task": total_tasks_done >= 1,
+        "ten_tasks": total_tasks_done >= 10,
+        "fifty_points": total_points >= 50,
+        "hundred_points": total_points >= 100,
+        "three_day_streak": streak >= 3,
+        "seven_day_streak": streak >= 7,
+        "challenge": challenge_done,
+        "helper": any(
+            a.get("kid") == kid
+            for a in data["helper_awards"]
+        ),
+    }
+
+    newly_unlocked = []
+
+    for badge_id, unlocked_now in checks.items():
+
+        if unlocked_now and badge_id not in unlocked:
+
+            unlocked.append(badge_id)
+            newly_unlocked.append(badge_id)
+
+    if newly_unlocked:
+        save_data(data)
+
+    return newly_unlocked
+
+
+# ============================================================
+# TRANSACTIONS
+# ============================================================
+
+def add_points(
+    kid,
+    points,
+    task,
+    note="",
+    approved=True
+):
+
+    entry = {
+        "date": TODAY.isoformat(),
+        "kid": kid,
+        "task": task,
+        "points": int(points),
+        "note": note,
+        "approved": approved,
+    }
+
+    data["log"].append(entry)
+
+    if approved:
+        data["balances"][kid] += int(points)
+
+        data["challenge_progress"][kid] += 1
+
+    newly_unlocked = award_badges(kid)
+
+    save_data(data)
+
+    return newly_unlocked
 
 
 def award_bonus(kid, points, reason):
 
-    data["balances"][kid] += points
+    data["balances"][kid] += int(points)
 
     data["log"].append(
         {
-            "date": date.today().isoformat(),
+            "date": TODAY.isoformat(),
             "kid": kid,
             "task": reason,
-            "points": points,
-            "note": "Bonus",
+            "points": int(points),
+            "note": "Parent bonus",
             "approved": True,
         }
     )
+
+    award_badges(kid)
+
+    save_data(data)
+
+
+# ============================================================
+# CSS — MOBILE FIRST
+# ============================================================
+
+st.markdown(
+    """
+    <style>
+
+    .block-container {
+        padding-top: 1rem;
+        padding-bottom: 2rem;
+        max-width: 700px;
+    }
+
+    .stButton > button {
+        min-height: 48px;
+        border-radius: 12px;
+        font-weight: 600;
+    }
+
+    div[data-testid="stMetric"] {
+        border-radius: 14px;
+        padding: 10px;
+    }
+
+    div[data-testid="stExpander"] {
+        border-radius: 14px;
+    }
+
+    .hero-card {
+        padding: 20px;
+        border-radius: 18px;
+        border: 1px solid rgba(128,128,128,.25);
+        margin-bottom: 12px;
+    }
+
+    .big-number {
+        font-size: 38px;
+        font-weight: 800;
+        line-height: 1;
+    }
+
+    .small-muted {
+        opacity: .7;
+        font-size: 13px;
+    }
+
+    .reward-card {
+        padding: 15px;
+        border-radius: 15px;
+        border: 1px solid rgba(128,128,128,.25);
+        margin-bottom: 10px;
+    }
+
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
+
+# ============================================================
+# SESSION STATE
+# ============================================================
+
+if "parent_mode" not in st.session_state:
+    st.session_state.parent_mode = False
+
+if "selected_kid" not in st.session_state:
+    st.session_state.selected_kid = KIDS[0]
 
 
 # ============================================================
@@ -460,29 +744,22 @@ def award_bonus(kid, points, reason):
 st.title("🏠 House Points")
 
 st.caption(
-    "Earn points • Complete challenges • Win awards • Have fun"
+    "Earn it • Achieve it • Win it"
 )
 
-
-today = date.today()
-
-upcoming_tuesday = next_tuesday(today)
-
-bin_due = bin_type_for_date(
-    upcoming_tuesday
-)
-
-
 # ============================================================
-# TOP DASHBOARD
+# BIN CARD
 # ============================================================
+
+bin_day = next_tuesday(TODAY)
+bin_due = bin_type_for_date(bin_day)
 
 with st.container(border=True):
 
-    st.subheader("🗑️ Next bin day")
+    st.subheader("🗑️ Next Bin Day")
 
     st.write(
-        f"**{upcoming_tuesday.strftime('%A %d %B')}**"
+        f"**{bin_day.strftime('%A %d %B')}**"
     )
 
     st.write(
@@ -491,45 +768,22 @@ with st.container(border=True):
 
 
 # ============================================================
-# FAIRNESS EXPLANATION
+# NAVIGATION
 # ============================================================
 
-with st.expander("⚖️ How the fair competition works"):
-
-    st.write(
-        """
-        Everyone is compared against the opportunities they actually
-        have.
-
-        A child isn't disadvantaged because they weren't at the house.
-
-        The app looks at:
-
-        • Points earned  
-        • Available days  
-        • Points per available day  
-        • Improvement  
-        • Challenges  
-        • Streaks  
-        • Helping others
-        """
-    )
-
-
-# ============================================================
-# MAIN TABS
-# ============================================================
-
-tabs = st.tabs(
+page = st.radio(
+    "Navigate",
     [
         "🏠 Home",
+        "👦 My Profile",
         "✅ Chores",
-        "⭐ My Points",
         "🎁 Rewards",
         "🏆 House Cup",
         "📜 History",
-        "🔐 Parent Mode",
-    ]
+        "🔐 Parent",
+    ],
+    horizontal=True,
+    label_visibility="collapsed",
 )
 
 
@@ -537,59 +791,55 @@ tabs = st.tabs(
 # HOME
 # ============================================================
 
-with tabs[0]:
+if page == "🏠 Home":
 
-    st.header("🏠 House Dashboard")
+    st.header("🏠 Family Dashboard")
+
+    st.subheader("This Week")
 
     cols = st.columns(len(KIDS))
 
-    for i, kid in enumerate(KIDS):
+    for index, kid in enumerate(KIDS):
 
-        with cols[i]:
+        with cols[index]:
 
-            st.subheader(kid)
+            st.markdown(
+                f"""
+                <div class="hero-card">
 
-            st.metric(
-                "Points",
-                data["balances"][kid]
+                <h3>{kid}</h3>
+
+                <div class="big-number">
+                {data['balances'][kid]}
+                </div>
+
+                <div class="small-muted">
+                total points
+                </div>
+
+                </div>
+                """,
+                unsafe_allow_html=True,
             )
-
-            week_points = points_earned_this_week(kid)
 
             st.write(
-                f"**{week_points} pts this week**"
+                f"⭐ {points_this_week(kid)} this week"
             )
 
-            days = available_days_this_week(kid)
-
-            st.caption(
-                f"{days} available days this week"
+            st.write(
+                f"⚖️ {fairness_score(kid)}/100 fair score"
             )
 
-            streak = streak_for_kid(kid)
-
-            if streak > 0:
-
-                st.write(
-                    f"🔥 {streak} day streak"
-                )
-
-            progress = challenge_progress(kid)
-
-            st.progress(
-                min(progress / 3, 1.0)
-            )
-
-            st.caption(
-                f"🎯 Weekend challenge: {progress}/3 jobs"
+            st.write(
+                f"🔥 {current_streak(kid)} day streak"
             )
 
 
     st.divider()
 
-    st.header("🎯 This week's challenge")
+    st.subheader("🎯 Weekly Challenge")
 
-    challenge = data["weekly_challenges"]
+    challenge = data["challenge"]
 
     st.info(
         f"""
@@ -597,31 +847,224 @@ with tabs[0]:
 
         {challenge['description']}
 
-        ⭐ **+{challenge['bonus']} bonus points**
+        🏆 Complete it for **+{challenge['bonus']} bonus points**
         """
     )
+
+    for kid in KIDS:
+
+        progress = data["challenge_progress"].get(
+            kid,
+            0
+        )
+
+        target = challenge["target"]
+
+        st.write(
+            f"**{kid}: {progress}/{target}**"
+        )
+
+        st.progress(
+            min(progress / target, 1.0)
+        )
 
 
     st.divider()
 
-    st.header("📅 Today's opportunities")
+    st.subheader("🏆 Current Leaders")
 
-    today_tasks = [
-        (
-            category,
-            task,
-            points
+    scores = {
+        kid: fairness_score(kid)
+        for kid in KIDS
+    }
+
+    leader = max(
+        scores,
+        key=scores.get
+    )
+
+    st.success(
+        f"⚖️ Current Fairness Leader: "
+        f"**{leader}** — {scores[leader]}/100"
+    )
+
+
+    raw_leader = max(
+        KIDS,
+        key=lambda k: points_this_week(k)
+    )
+
+    st.info(
+        f"⭐ Points Leader: "
+        f"**{raw_leader}** — "
+        f"{points_this_week(raw_leader)} points"
+    )
+
+
+# ============================================================
+# PROFILE
+# ============================================================
+
+elif page == "👦 My Profile":
+
+    st.header("👦 My Profile")
+
+    kid = st.selectbox(
+        "Choose profile",
+        KIDS
+    )
+
+    st.session_state.selected_kid = kid
+
+    st.subheader(
+        f"{kid}'s Dashboard"
+    )
+
+    c1, c2 = st.columns(2)
+
+    with c1:
+
+        st.metric(
+            "Points",
+            data["balances"][kid]
         )
 
-        for category, tasks in TASK_MENU.items()
+    with c2:
 
-        for task, points in tasks.items()
-    ]
+        st.metric(
+            "Fair Score",
+            f"{fairness_score(kid)}/100"
+        )
 
-    for category, task, points in today_tasks[:8]:
 
-        st.write(
-            f"**{task}** — ⭐ {points} pts"
+    st.divider()
+
+    st.subheader("📊 Your Week")
+
+    c1, c2, c3 = st.columns(3)
+
+    with c1:
+        st.metric(
+            "This Week",
+            points_this_week(kid)
+        )
+
+    with c2:
+        st.metric(
+            "Per Available Day",
+            f"{points_per_available_day(kid):.1f}"
+        )
+
+    with c3:
+        st.metric(
+            "Streak",
+            f"{current_streak(kid)} 🔥"
+        )
+
+
+    st.divider()
+
+    st.subheader("📈 Your Improvement")
+
+    improvement = improvement_percentage(kid)
+
+    if improvement > 0:
+
+        st.success(
+            f"You're up **{improvement:.0f}%** "
+            f"on last week! 🚀"
+        )
+
+    elif improvement < 0:
+
+        st.warning(
+            f"You're {abs(improvement):.0f}% "
+            f"below last week."
+        )
+
+    else:
+
+        st.info(
+            "No change from last week."
+        )
+
+
+    st.divider()
+
+    st.subheader("🏅 Badges")
+
+    newly = award_badges(kid)
+
+    if newly:
+
+        st.balloons()
+
+        st.success(
+            "🎉 New badge unlocked!"
+        )
+
+    badges = data["profiles"][kid].get(
+        "badges",
+        []
+    )
+
+    if not badges:
+
+        st.info(
+            "No badges yet. Start completing tasks!"
+        )
+
+    else:
+
+        badge_cols = st.columns(2)
+
+        for i, badge_id in enumerate(badges):
+
+            badge = next(
+                (
+                    b for b in BADGES
+                    if b["id"] == badge_id
+                ),
+                None
+            )
+
+            if badge:
+
+                with badge_cols[i % 2]:
+
+                    st.success(
+                        f"{badge['emoji']} "
+                        f"**{badge['name']}**"
+                    )
+
+                    st.caption(
+                        badge["description"]
+                    )
+
+
+    st.divider()
+
+    st.subheader("🎯 Challenge")
+
+    progress = data["challenge_progress"].get(
+        kid,
+        0
+    )
+
+    target = data["challenge"]["target"]
+
+    st.progress(
+        min(progress / target, 1.0)
+    )
+
+    st.write(
+        f"{progress}/{target} tasks completed"
+    )
+
+    if progress >= target:
+
+        st.success(
+            "🏆 Challenge complete!"
         )
 
 
@@ -629,70 +1072,79 @@ with tabs[0]:
 # CHORES
 # ============================================================
 
-with tabs[1]:
+elif page == "✅ Chores":
 
-    st.header("✅ Complete a chore")
+    st.header("✅ Chores")
 
     kid = st.selectbox(
-        "Who completed it?",
+        "Who completed the task?",
         KIDS,
         key="chore_kid"
     )
 
-    if not kid_available(kid, today):
+    if not kid_available(kid, TODAY):
 
         st.warning(
-            f"{kid} isn't normally scheduled to be here today."
+            f"Today isn't normally one of {kid}'s available days."
         )
 
         st.caption(
-            "Parent can still approve a task if appropriate."
+            "A parent can still approve the task."
         )
 
 
     category = st.selectbox(
         "Category",
-        list(TASK_MENU.keys()),
-        key="task_category"
+        list(TASK_MENU.keys())
     )
+
+    tasks = TASK_MENU[category]
 
     task = st.selectbox(
         "Task",
-        list(TASK_MENU[category].keys()),
-        key="task"
+        list(tasks.keys())
     )
 
-    points = TASK_MENU[category][task]
+    points = tasks[task]
 
-    st.success(
-        f"⭐ This task is worth **{points} points**"
+    st.markdown(
+        f"""
+        <div class="hero-card">
+
+        <h3>⭐ {points} points</h3>
+
+        <p>{task}</p>
+
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
     note = ""
 
-    if category == "Personal growth":
+    if category == "📚 Personal Growth":
 
         note = st.text_input(
-            "What did you read/learn/practise?",
-            key="growth_note"
+            "Tell us what you read/learned/practised"
         )
 
 
     if st.button(
-        "⭐ Complete Task",
+        "🎉 Complete Task",
         type="primary",
         use_container_width=True
     ):
 
-        # Personal growth tasks require parent approval.
-        requires_approval = category == "Personal growth"
+        requires_approval = (
+            category == "📚 Personal Growth"
+        )
 
         if requires_approval:
 
             data["log"].append(
                 {
-                    "date": today.isoformat(),
+                    "date": TODAY.isoformat(),
                     "kid": kid,
                     "task": task,
                     "points": points,
@@ -701,13 +1153,15 @@ with tabs[1]:
                 }
             )
 
+            save_data(data)
+
             st.info(
-                "Task submitted for parent approval."
+                "⏳ Sent to Parent Mode for approval."
             )
 
         else:
 
-            add_points(
+            new_badges = add_points(
                 kid,
                 points,
                 task,
@@ -715,117 +1169,49 @@ with tabs[1]:
                 True
             )
 
-            data["challenge_progress"][kid] += 1
-
             st.balloons()
 
             st.success(
                 f"🎉 {kid} earned {points} points!"
             )
 
-        save_data(data)
+            if new_badges:
+
+                for badge_id in new_badges:
+
+                    badge = next(
+                        b for b in BADGES
+                        if b["id"] == badge_id
+                    )
+
+                    st.success(
+                        f"{badge['emoji']} "
+                        f"NEW BADGE: "
+                        f"{badge['name']}!"
+                    )
 
         st.rerun()
-
-
-# ============================================================
-# MY POINTS
-# ============================================================
-
-with tabs[2]:
-
-    st.header("⭐ Points")
-
-    kid = st.selectbox(
-        "Choose player",
-        KIDS,
-        key="points_kid"
-    )
-
-    balance = data["balances"][kid]
-
-    st.metric(
-        "Current balance",
-        f"{balance} pts"
-    )
-
-    device_minutes = (
-        balance // DEVICE_TIME_RATE
-    ) * DEVICE_BLOCK_MINUTES
-
-    st.write(
-        f"🎮 That's approximately **{device_minutes} minutes** of device time."
-    )
-
-
-    st.divider()
-
-    weekly = points_earned_this_week(kid)
-
-    days = available_days_this_week(kid)
-
-    per_day = points_per_available_day(kid)
-
-    st.subheader("📊 This week")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric(
-            "Points",
-            weekly
-        )
-
-    with c2:
-        st.metric(
-            "Available days",
-            days
-        )
-
-    with c3:
-        st.metric(
-            "Points/day",
-            f"{per_day:.1f}"
-        )
-
-
-    st.divider()
-
-    st.subheader("🔥 Streak")
-
-    streak = streak_for_kid(kid)
-
-    if streak:
-
-        st.success(
-            f"{streak} consecutive day(s)!"
-        )
-
-    else:
-
-        st.info(
-            "Complete a task today to start a streak."
-        )
 
 
 # ============================================================
 # REWARDS
 # ============================================================
 
-with tabs[3]:
+elif page == "🎁 Rewards":
 
     st.header("🎁 Rewards Shop")
 
     kid = st.selectbox(
-        "Who's spending?",
+        "Who's spending points?",
         KIDS,
-        key="reward_kid"
+        key="shop_kid"
     )
 
     balance = data["balances"][kid]
 
-    st.write(
-        f"**{kid}'s balance: {balance} points**"
+    st.metric(
+        f"{kid}'s Balance",
+        f"{balance} pts"
     )
 
     st.divider()
@@ -834,10 +1220,15 @@ with tabs[3]:
         data["rewards"]
     ):
 
+        affordable = (
+            balance >= reward["points"]
+        )
+
         with st.container(border=True):
 
             st.subheader(
-                f"🎁 {reward['name']}"
+                f"{reward['emoji']} "
+                f"{reward['name']}"
             )
 
             st.write(
@@ -848,154 +1239,187 @@ with tabs[3]:
                 f"⭐ **{reward['points']} points**"
             )
 
-            can_afford = (
-                balance >= reward["points"]
-            )
+            if affordable:
 
-            if st.button(
-                "Redeem",
-                key=f"reward_{index}",
-                disabled=not can_afford
-            ):
+                if st.button(
+                    "🎁 Redeem",
+                    key=f"redeem_{index}",
+                    use_container_width=True
+                ):
 
-                cost = reward["points"]
+                    data["balances"][kid] -= reward["points"]
 
-                data["balances"][kid] -= cost
+                    data["redemptions"].append(
+                        {
+                            "date": TODAY.isoformat(),
+                            "kid": kid,
+                            "reward": reward["name"],
+                            "points_spent": reward["points"],
+                        }
+                    )
 
-                data["redemptions"].append(
-                    {
-                        "date": today.isoformat(),
-                        "kid": kid,
-                        "reward": reward["name"],
-                        "points_spent": cost,
-                    }
+                    save_data(data)
+
+                    st.balloons()
+
+                    st.success(
+                        f"🎉 {kid} redeemed "
+                        f"{reward['name']}!"
+                    )
+
+                    st.rerun()
+
+            else:
+
+                missing = (
+                    reward["points"] - balance
                 )
 
-                save_data(data)
-
-                st.success(
-                    f"🎉 {kid} redeemed {reward['name']}!"
+                st.caption(
+                    f"🔒 {missing} more points needed"
                 )
-
-                st.rerun()
 
 
 # ============================================================
 # HOUSE CUP
 # ============================================================
 
-with tabs[4]:
+elif page == "🏆 House Cup":
 
     st.header("🏆 House Cup")
 
     st.caption(
-        "The winner isn't simply the person with the most points."
+        "There are several ways to win. "
+        "Raw points aren't everything."
     )
 
 
-    stats = {}
+    # ========================================================
+    # FAIRNESS LEADER
+    # ========================================================
 
-    for kid in KIDS:
+    scores = {
+        kid: fairness_score(kid)
+        for kid in KIDS
+    }
 
-        weekly = points_earned_this_week(kid)
-
-        days = available_days_this_week(kid)
-
-        per_day = points_per_available_day(kid)
-
-        improvement = improvement_score(kid)
-
-        tasks = tasks_completed_this_week(kid)
-
-        stats[kid] = {
-            "weekly": weekly,
-            "days": days,
-            "per_day": per_day,
-            "improvement": improvement,
-            "tasks": tasks,
-        }
-
-
-    # --------------------------------------------------------
-    # POINTS CHAMPION
-    # --------------------------------------------------------
-
-    st.subheader("🏆 Points Champion")
-
-    winner = max(
-        KIDS,
-        key=lambda k: stats[k]["weekly"]
+    fairness_winner = max(
+        scores,
+        key=scores.get
     )
+
+    st.subheader("⚖️ Fairness Champion")
 
     st.success(
-        f"🏆 **{winner}** — {stats[winner]['weekly']} points"
+        f"🏆 **{fairness_winner}** — "
+        f"{scores[fairness_winner]}/100"
     )
 
 
-    # --------------------------------------------------------
+    # ========================================================
+    # POINTS CHAMPION
+    # ========================================================
+
+    raw_scores = {
+        kid: points_this_week(kid)
+        for kid in KIDS
+    }
+
+    points_winner = max(
+        raw_scores,
+        key=raw_scores.get
+    )
+
+    st.subheader("⭐ Points Champion")
+
+    st.info(
+        f"⭐ **{points_winner}** — "
+        f"{raw_scores[points_winner]} points"
+    )
+
+
+    # ========================================================
     # CONSISTENCY
-    # --------------------------------------------------------
+    # ========================================================
+
+    consistency_scores = {
+        kid: points_per_available_day(kid)
+        for kid in KIDS
+    }
+
+    consistency_winner = max(
+        consistency_scores,
+        key=consistency_scores.get
+    )
 
     st.subheader("⚖️ Consistency Champion")
 
-    winner = max(
-        KIDS,
-        key=lambda k: stats[k]["per_day"]
-    )
-
     st.success(
-        f"⚖️ **{winner}** — "
-        f"{stats[winner]['per_day']:.1f} points per available day"
+        f"⚖️ **{consistency_winner}** — "
+        f"{consistency_scores[consistency_winner]:.1f} "
+        f"points per available day"
     )
 
 
-    # --------------------------------------------------------
-    # BIGGEST IMPROVEMENT
-    # --------------------------------------------------------
+    # ========================================================
+    # BIGGEST IMPROVER
+    # ========================================================
 
-    st.subheader("📈 Biggest Effort")
+    improvement_scores = {
+        kid: improvement_percentage(kid)
+        for kid in KIDS
+    }
 
-    winner = max(
-        KIDS,
-        key=lambda k: stats[k]["improvement"]
+    improvement_winner = max(
+        improvement_scores,
+        key=improvement_scores.get
     )
 
-    improvement = stats[winner]["improvement"]
+    st.subheader("📈 Biggest Improver")
 
-    if improvement > 0:
+    if improvement_scores[improvement_winner] > 0:
 
         st.success(
-            f"📈 **{winner}** improved by "
-            f"{improvement:.0f}% compared with last week."
+            f"🚀 **{improvement_winner}** — "
+            f"+{improvement_scores[improvement_winner]:.0f}%"
         )
 
     else:
 
         st.info(
-            "Not enough previous-week data yet."
+            "Not enough improvement data yet."
         )
 
 
-    # --------------------------------------------------------
-    # CHALLENGE CHAMPION
-    # --------------------------------------------------------
+    # ========================================================
+    # CHALLENGE
+    # ========================================================
+
+    challenge_scores = {
+        kid: data["challenge_progress"].get(
+            kid,
+            0
+        )
+        for kid in KIDS
+    }
+
+    challenge_winner = max(
+        challenge_scores,
+        key=challenge_scores.get
+    )
 
     st.subheader("🎯 Challenge Champion")
 
-    challenge_winner = max(
-        KIDS,
-        key=lambda k: challenge_progress(k)
-    )
-
     st.success(
         f"🎯 **{challenge_winner}** — "
-        f"{challenge_progress(challenge_winner)}/3 jobs"
+        f"{challenge_scores[challenge_winner]}/"
+        f"{data['challenge']['target']}"
     )
 
 
-    # --------------------------------------------------------
-    # HELPER OF THE WEEK
-    # --------------------------------------------------------
+    # ========================================================
+    # HELPER
+    # ========================================================
 
     st.subheader("🤝 Helper of the Week")
 
@@ -1011,34 +1435,61 @@ with tabs[4]:
     else:
 
         st.info(
-            "Parent hasn't selected Helper of the Week yet."
+            "No Helper of the Week selected yet."
         )
 
+
+    # ========================================================
+    # SCOREBOARD
+    # ========================================================
 
     st.divider()
 
-    st.subheader("📊 Fair comparison")
+    st.subheader("📊 Full Scoreboard")
 
-    for kid in KIDS:
+    for kid in sorted(
+        KIDS,
+        key=lambda k: scores[k],
+        reverse=True
+    ):
 
-        st.write(
+        st.markdown(
             f"### {kid}"
         )
 
+        c1, c2 = st.columns(2)
+
+        with c1:
+
+            st.metric(
+                "Fair Score",
+                f"{scores[kid]}/100"
+            )
+
+        with c2:
+
+            st.metric(
+                "Weekly Points",
+                raw_scores[kid]
+            )
+
         st.write(
-            f"⭐ {stats[kid]['weekly']} points"
+            f"📅 {available_days_this_week(kid)} "
+            f"available days"
         )
 
         st.write(
-            f"📅 {stats[kid]['days']} available days"
+            f"⚖️ {consistency_scores[kid]:.1f} "
+            f"points/day"
         )
 
         st.write(
-            f"⚖️ {stats[kid]['per_day']:.1f} points/day"
+            f"📈 {improvement_scores[kid]:+.0f}% "
+            f"vs last week"
         )
 
         st.write(
-            f"🔥 {streak_for_kid(kid)} day streak"
+            f"🔥 {current_streak(kid)} day streak"
         )
 
         st.divider()
@@ -1048,46 +1499,60 @@ with tabs[4]:
 # HISTORY
 # ============================================================
 
-with tabs[5]:
+elif page == "📜 History":
 
-    st.header("📜 Activity History")
+    st.header("📜 History")
+
+    filter_kid = st.selectbox(
+        "Show",
+        ["Everyone"] + KIDS
+    )
 
     events = []
 
-
     for entry in data["log"]:
 
-        status = ""
-
-        if not entry.get("approved", True):
-
-            status = " ⏳ Awaiting approval"
+        if (
+            filter_kid != "Everyone"
+            and entry["kid"] != filter_kid
+        ):
+            continue
 
         events.append(
             {
                 "date": entry["date"],
                 "kid": entry["kid"],
-                "description": (
-                    f"Earned {entry['points']} pts — "
-                    f"{entry['task']}"
-                    f"{status}"
-                ),
+                "description": entry["task"],
                 "points": entry["points"],
+                "approved": entry.get(
+                    "approved",
+                    True
+                ),
             }
         )
 
 
     for entry in data["redemptions"]:
 
+        if (
+            filter_kid != "Everyone"
+            and entry["kid"] != filter_kid
+        ):
+            continue
+
         events.append(
             {
                 "date": entry["date"],
                 "kid": entry["kid"],
                 "description": (
-                    f"Redeemed — "
-                    f"{entry.get('reward', 'Device time')}"
+                    "Redeemed: "
+                    + entry.get(
+                        "reward",
+                        "Device time"
+                    )
                 ),
                 "points": -entry["points_spent"],
+                "approved": True,
             }
         )
 
@@ -1108,51 +1573,59 @@ with tabs[5]:
 
         for event in events[:100]:
 
-            symbol = (
-                "⭐"
-                if event["points"] > 0
-                else "🎁"
-            )
+            if not event["approved"]:
 
-            st.write(
-                f"{symbol} **{event['date']}** — "
-                f"**{event['kid']}** — "
-                f"{event['description']}"
-            )
+                st.warning(
+                    f"⏳ **{event['date']}** — "
+                    f"{event['kid']} — "
+                    f"{event['description']} — "
+                    f"{event['points']} pts — "
+                    f"Awaiting approval"
+                )
+
+            elif event["points"] > 0:
+
+                st.success(
+                    f"⭐ **{event['date']}** — "
+                    f"{event['kid']} — "
+                    f"{event['description']} — "
+                    f"+{event['points']} pts"
+                )
+
+            else:
+
+                st.info(
+                    f"🎁 **{event['date']}** — "
+                    f"{event['kid']} — "
+                    f"{event['description']} — "
+                    f"{event['points']} pts"
+                )
 
 
 # ============================================================
-# PARENT MODE
+# PARENT
 # ============================================================
 
-with tabs[6]:
+elif page == "🔐 Parent":
 
     st.header("🔐 Parent Mode")
 
-    if "parent_authenticated" not in st.session_state:
-
-        st.session_state.parent_authenticated = False
-
-
-    if not st.session_state.parent_authenticated:
+    if not st.session_state.parent_mode:
 
         pin = st.text_input(
-            "Enter parent PIN",
+            "Parent PIN",
             type="password"
         )
 
         if st.button(
-            "Unlock Parent Mode",
-            type="primary"
+            "🔓 Unlock",
+            type="primary",
+            use_container_width=True
         ):
 
             if pin == data["settings"]["parent_pin"]:
 
-                st.session_state.parent_authenticated = True
-
-                st.success(
-                    "Parent Mode unlocked."
-                )
+                st.session_state.parent_mode = True
 
                 st.rerun()
 
@@ -1169,10 +1642,11 @@ with tabs[6]:
             "🔓 Parent Mode unlocked"
         )
 
+        if st.button(
+            "🔒 Lock Parent Mode"
+        ):
 
-        if st.button("Lock Parent Mode"):
-
-            st.session_state.parent_authenticated = False
+            st.session_state.parent_mode = False
 
             st.rerun()
 
@@ -1180,19 +1654,24 @@ with tabs[6]:
         st.divider()
 
         # ====================================================
-        # PENDING APPROVALS
+        # APPROVALS
         # ====================================================
 
-        st.subheader("⏳ Pending approvals")
+        st.subheader("⏳ Pending Approvals")
 
-        pending_found = False
+        pending = [
+            (i, entry)
+            for i, entry in enumerate(data["log"])
+            if not entry.get("approved", True)
+        ]
 
-        for index, entry in enumerate(data["log"]):
+        if not pending:
 
-            if entry.get("approved", True):
-                continue
+            st.info(
+                "No tasks waiting for approval."
+            )
 
-            pending_found = True
+        for index, entry in pending:
 
             with st.container(border=True):
 
@@ -1204,16 +1683,15 @@ with tabs[6]:
                     entry["task"]
                 )
 
+                st.write(
+                    f"⭐ {entry['points']} points"
+                )
+
                 if entry.get("note"):
 
                     st.caption(
                         entry["note"]
                     )
-
-                st.write(
-                    f"⭐ {entry['points']} points"
-                )
-
 
                 c1, c2 = st.columns(2)
 
@@ -1234,10 +1712,13 @@ with tabs[6]:
                             entry["kid"]
                         ] += 1
 
+                        award_badges(
+                            entry["kid"]
+                        )
+
                         save_data(data)
 
                         st.rerun()
-
 
                 with c2:
 
@@ -1253,43 +1734,34 @@ with tabs[6]:
                         st.rerun()
 
 
-        if not pending_found:
-
-            st.info(
-                "No pending approvals."
-            )
-
-
         st.divider()
 
         # ====================================================
-        # MANUAL BONUS
+        # PARENT BONUS
         # ====================================================
 
-        st.subheader("⭐ Award bonus points")
+        st.subheader("⭐ Parent Bonus")
 
         bonus_kid = st.selectbox(
             "Child",
             KIDS,
-            key="bonus_kid"
+            key="parent_bonus_kid"
         )
 
         bonus_points = st.number_input(
             "Points",
             min_value=1,
             max_value=100,
-            value=5,
-            key="bonus_points"
+            value=5
         )
 
         bonus_reason = st.text_input(
             "Reason",
-            value="Helping without being asked",
-            key="bonus_reason"
+            value="Great helping"
         )
 
         if st.button(
-            "Award Bonus",
+            "⭐ Award Bonus",
             type="primary"
         ):
 
@@ -1299,11 +1771,9 @@ with tabs[6]:
                 bonus_reason
             )
 
-            save_data(data)
-
             st.success(
                 f"{bonus_kid} received "
-                f"{bonus_points} bonus points!"
+                f"{bonus_points} points."
             )
 
             st.rerun()
@@ -1312,21 +1782,20 @@ with tabs[6]:
         st.divider()
 
         # ====================================================
-        # HELPER OF THE WEEK
+        # HELPER OF WEEK
         # ====================================================
 
         st.subheader("🤝 Helper of the Week")
 
         helper_kid = st.selectbox(
-            "Choose winner",
+            "Winner",
             KIDS,
-            key="helper_kid"
+            key="helper_winner"
         )
 
         helper_reason = st.text_input(
-            "Why?",
-            value="Great helping this week",
-            key="helper_reason"
+            "Reason",
+            value="Fantastic helping this week"
         )
 
         if st.button(
@@ -1335,7 +1804,7 @@ with tabs[6]:
 
             data["helper_awards"].append(
                 {
-                    "date": today.isoformat(),
+                    "date": TODAY.isoformat(),
                     "kid": helper_kid,
                     "reason": helper_reason,
                 }
@@ -1350,7 +1819,7 @@ with tabs[6]:
             save_data(data)
 
             st.success(
-                f"{helper_kid} is Helper of the Week!"
+                f"🏆 {helper_kid} is Helper of the Week!"
             )
 
             st.rerun()
@@ -1359,14 +1828,10 @@ with tabs[6]:
         st.divider()
 
         # ====================================================
-        # CHANGE AVAILABILITY
+        # AVAILABILITY
         # ====================================================
 
         st.subheader("📅 Availability")
-
-        st.caption(
-            "This is what makes the competition fair."
-        )
 
         day_names = [
             "Monday",
@@ -1380,27 +1845,22 @@ with tabs[6]:
 
         for kid in KIDS:
 
-            st.write(
-                f"**{kid}**"
-            )
-
-            current_days = data[
-                "availability"
-            ].get(kid, [])
-
             selected = st.multiselect(
-                f"{kid}'s available days",
+                f"{kid}'s normal days",
                 options=list(range(7)),
-                default=current_days,
+                default=data["availability"].get(
+                    kid,
+                    []
+                ),
                 format_func=lambda x: day_names[x],
-                key=f"availability_{kid}"
+                key=f"days_{kid}"
             )
 
             data["availability"][kid] = selected
 
 
         if st.button(
-            "Save availability"
+            "💾 Save Availability"
         ):
 
             save_data(data)
@@ -1415,44 +1875,54 @@ with tabs[6]:
         st.divider()
 
         # ====================================================
-        # CHANGE CHALLENGE
+        # CHALLENGE
         # ====================================================
 
         st.subheader("🎯 Weekly Challenge")
 
         challenge_title = st.text_input(
-            "Challenge title",
-            value=data["weekly_challenges"]["title"]
+            "Title",
+            value=data["challenge"]["title"]
         )
 
         challenge_description = st.text_input(
             "Description",
-            value=data["weekly_challenges"]["description"]
+            value=data["challenge"]["description"]
+        )
+
+        challenge_target = st.number_input(
+            "Target",
+            min_value=1,
+            max_value=20,
+            value=int(
+                data["challenge"]["target"]
+            )
         )
 
         challenge_bonus = st.number_input(
-            "Bonus points",
+            "Bonus",
             min_value=1,
             max_value=100,
             value=int(
-                data["weekly_challenges"]["bonus"]
+                data["challenge"]["bonus"]
             )
         )
 
         if st.button(
-            "Save Challenge"
+            "💾 Save Challenge"
         ):
 
-            data["weekly_challenges"] = {
+            data["challenge"] = {
                 "title": challenge_title,
                 "description": challenge_description,
+                "target": int(challenge_target),
                 "bonus": int(challenge_bonus),
             }
 
             save_data(data)
 
             st.success(
-                "Challenge updated."
+                "Challenge saved."
             )
 
             st.rerun()
@@ -1467,25 +1937,27 @@ with tabs[6]:
         st.subheader("🎁 Add Reward")
 
         reward_name = st.text_input(
-            "Reward name",
-            key="new_reward_name"
+            "Reward name"
         )
 
         reward_description = st.text_input(
-            "Description",
-            key="new_reward_description"
+            "Description"
         )
 
-        reward_cost = st.number_input(
+        reward_points = st.number_input(
             "Cost",
             min_value=1,
             max_value=1000,
-            value=20,
-            key="new_reward_cost"
+            value=20
+        )
+
+        reward_emoji = st.text_input(
+            "Emoji",
+            value="🎁"
         )
 
         if st.button(
-            "Add Reward"
+            "➕ Add Reward"
         ):
 
             if reward_name:
@@ -1493,8 +1965,9 @@ with tabs[6]:
                 data["rewards"].append(
                     {
                         "name": reward_name,
-                        "points": int(reward_cost),
+                        "points": int(reward_points),
                         "description": reward_description,
+                        "emoji": reward_emoji,
                     }
                 )
 
@@ -1505,6 +1978,34 @@ with tabs[6]:
                 )
 
                 st.rerun()
+
+
+        st.divider()
+
+        # ====================================================
+        # RESET WEEKLY CHALLENGE
+        # ====================================================
+
+        st.subheader(
+            "🔄 Start New Weekly Challenge"
+        )
+
+        if st.button(
+            "Reset Challenge Progress"
+        ):
+
+            data["challenge_progress"] = {
+                kid: 0
+                for kid in KIDS
+            }
+
+            save_data(data)
+
+            st.success(
+                "Challenge progress reset."
+            )
+
+            st.rerun()
 
 
         st.divider()
@@ -1531,13 +2032,13 @@ with tabs[6]:
                 save_data(data)
 
                 st.success(
-                    "Parent PIN changed."
+                    "PIN changed."
                 )
 
             else:
 
                 st.error(
-                    "PIN must be at least 4 characters."
+                    "PIN must contain at least 4 characters."
                 )
 
 
@@ -1549,5 +2050,5 @@ st.divider()
 
 st.caption(
     "🏠 House Points • Fair competition • "
-    "Earn it • Achieve it • Enjoy it"
+    "Different ways to win"
 )
